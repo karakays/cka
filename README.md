@@ -20,58 +20,90 @@ Which nodes have what components?
 |master| api-server, controller, etcd, scheduler
 |worker| container runtime, kubelet
 
-## How is k8s shipped?
+Q>>> control-plane vs. master node
+Q>>> kubectl talks to api-server only?
+Q>>> kubectl connection refused when in worker nodes because there is no api-server?
 
-### single-node
+## k8s cluster provisioning
+
+### As a single-node cluster
+
 `minikube` bundles k8s components in a single image and provides k8s service in a single node.
 
 `minikube start`
 
-### multi-node
+### As a multi-node cluster
+
 `kubeadm`
 
-### managed service providers
+#### Basic cluster setup
 
-* AWS EKS: Elastic Kubernetes Service
+Initialize master node
 
-* GCP GKE: Google Kubernetes Engine
+```
+kubeadm init --apiserver-advertise-address $(hostname -i) --pod-network-cidr 10.5.0.0/16
+```
 
+Initialize POD network
+
+```
+kubectl apply -f https://raw.githubusercontent.com/cloudnativelabs/kube-router/master/daemonset/kubeadm-kuberouter.yaml
+```
+
+Echo join-command for worker nodes to use to join the cluster
+
+```
+kubeadm token create --print-join-command
+```
+
+### As a managed service
+
+Clusters is provisioned and managed by the provider.
+
+* EKS: Elastic Kubernetes Service
+
+* GKE: Google Kubernetes Engine
+
+* AKS: Azure Kubernetes Service
 
 ### Resource management with `kubectl`
 
 #### Create
 
 Create resource from file in _non-idempotent_ way
-`kubectl create -f [resource]`
+
+`kubectl create -f resource.yml`
 
 Create or update resource from file in _idempotent_ way
-`kubectl create -f [resource]`
+
+`kubectl create -f resource.yml`
 
 #### Get
 
 Get overview of resource
+
 `kubectl get [resource]`
 
+Get multiple resources at once
+
+`kubectl get pods,svc`
+
 Get details of resource
+
 `kubectl describe [resource] `
 
 #### Update
 
-```
-kubectl apply -f resource.yml
-```
+`kubectl apply -f resource.yml`
 
-```
-kubectl edit [resource] [name]
-```
+`kubectl edit [resource] [name]`
 
-```
-kubectl set image [resource] [name] nginx=nginx:1.17
-```
+`kubectl set image [resource] [name] nginx=nginx:1.17`
 
 #### Delete
 
-Delete resource
+Delete resource  
+
 `kubectl delete [resource] [name]`
 
 ## Terms
@@ -84,7 +116,13 @@ Create and start a pod
 
 `kubectl run nginx --image nginx`
 
-`kubectl get pod`
+`Ready` column show number of containers in that pod.
+
+```
+$ kubectl get pod
+NAME                              READY   STATUS    RESTARTS   AGE
+myapp-pod                         2/2     Running   0          5s
+```
 
 `kubectl describe <resource> [name]`
 
@@ -97,9 +135,7 @@ Create and start a pod
 
 ### ReplicaSets
 
-Monitors the replica set and ensures desired number of pods are always up. If replica number goes below, it creates new pods. 
-
-ReplicaSets cannot make guess how to create pods. For this reason, there is `spec.template` to create pods.
+Pods alone cannot scale. ReplicaSet holds pod definition as a template and is able to scale the pods up/down.
 
 ReplicaSets need to know which pods belong to the set. This mapping is specified in `spec.selector.matchLabels` field.  Only those pods matching in the labels section are considered for the replica set.
 
@@ -109,7 +145,7 @@ NAME              DESIRED   CURRENT   READY   AGE
 foo-replica-set   4         4         0       5s
 ```
 
-|
+|||
 |---|---
 |desired | desired # pods
 |current | created # pods
@@ -121,15 +157,12 @@ kubectl scale replicaset myreplicaset --replicas=6
 
 ### Deployments
 
-Declarative deploys for pods and replicasets.
-
-Creating deployment sets up a new replica-set and associated pods under-the-hood.
-
-deployments -> replicaSets -> pods
+This resource brings declarative deploments. A deployment creates a new replica-set and associated pods under-the-hood. Scalability is still managed via replica-sets but deployment adds rollout and rollback deployment capabilities on top of it. Most of the time, deployment manifest brings replica-sets and pods implicitly so there is no need for additional manifests for replica-sets or pods.
 
 ```
 kubectl create deployment foo --image=bar
 ```
+
 `--record` flag is used to log the deployment command in the revision history. This can be seen in rollout history.
 
 ```
@@ -138,15 +171,15 @@ kubectl apply -f deploy.yml --record
 
 Deployment strategies
 1. recreate
-  - stop current release. deploy new release at once. causes down-time.
+    - stop current release. deploy new release at once. causes down-time.
 2. rolling update
-  - deploy releases at controlled rate. zero downtime.
+    - deploy releases at controlled rate. zero downtime.
 
 A deployment is considered updated if pod template is changed. Deployment phase, called rollout, is triggered. In that phase, first, new replica-set with 0 current pods are created. Then new replica-set is scaled up while old replica-set is scaled down. This repeated until all pods are migrated.
 
 How does rollout determine this?
-- Deployment ensures that at the time at least 75% of desired number of pods are up. 
-- Deployment also ensures at the time at most 125% of desired number of pods are up.
+- It ensures that at least 75% of desired number of pods are up at a time
+- Also ensures at most 125% of desired number of pods are up at a time
 
 Let's see an example of rollout. You have a replica-set of 40 pods and you trigger a new rollout. In the beginning, %25 of pods (10 in total) in stale replica-set goes to `Terminating` state one by one. Meanwhile, %25 of total number from new replica-set is put
 in `Pending` set. During this, rollout state looks like
@@ -157,12 +190,14 @@ my-app-deployment   30/40   0           30          2d14h
 ```
 
 When all 10 pods in old replica-set is in `Terminating`state, `Pending` containers start to go into `ContainerCreating state`. During this, rollout state looks like below. See that ready containers are still 30 but up-to-date containers is 10.
+
 ```
 NAME                READY   UP-TO-DATE   AVAILABLE   AGE
 my-app-deployment   30/40   10           30          2d14h
 ```
 
-Then, previous batch with `ContainerCreating` state start to go into `Running state and also more new pods go into `Pending` and old pods into `Terminating` state. At this moment, number of up-to-date pods increase but ready pods are still the same although more new pods go into `Running` state because exact number old pods are terminated.
+Then, previous batch with `ContainerCreating` state start to go into `Running state and also more new pods go into `Pending` and old pods into `Terminating` state`. At this moment, number of up-to-date pods increase but ready pods are still the same although more new pods go into `Running` state because exact number old pods are terminated.
+
 ```
 NAME                READY   UP-TO-DATE   AVAILABLE   AGE
 my-app-deployment   30/40   38           30          2d14h
@@ -195,6 +230,7 @@ kubectl get pods -w
 ```
 
 To check deployment revision history. The last row shows current deployment revision.
+
 ```
 $ kubectl rollout history [deployment] [name]
 REVISION  CHANGE-CAUSE
@@ -206,9 +242,12 @@ REVISION  CHANGE-CAUSE
 #### Rollback
 
 Rollback deploys the previous deployment in the revision history. This causes a new revision in the history.
+
 ```
 kubectl rollout undo [name]
+
 ```
+
 ```
 $ kubectl rollout history [deployment] [name]
 REVISION  CHANGE-CAUSE
@@ -225,17 +264,51 @@ kubectl scale deployment --replicas=3 foo
 
 kind: Pod | ReplicaSets | Deployment
 
-Create a new resource
-`kubectl create -f mypod.yml`
-
 Create pod spec
 `kubectl run pod --image redis --dry-run=client -o yaml > pod.yaml`
 
-Edit manifest of existing resource
-`kubectl edit replicaset myapp-rs`
 
-Update resource
-`kubectl apply -f mypod.yml`
+### k8s network model
 
-`kubectl replace -f myrs.yml`
+#### Prerequisite
 
+Every pod gets its own address. Container on the same pod share their network spaces. This is unlike docker services where each container gets a separate IP address.
+
+Network model requirements
+
+1. Pods on a node can communicate with pods on other nodes (in the same cluster???) without NAT. A service can reach other service by name. Standalone pods (that doesn't belong to a service) should be able to reach services by name.
+2. Agents on a node can communicate with any pods on the same node.
+
+There are many solutions out there to satify such network requirements. Unlike the built-in overlay network implementation in docker, k8s relies on third-party implementations. To name a few AWS VPC CNI, Google Compute Engine, Flannel, Cisco etc.
+
+### Service
+
+Service enable pods to expose applications to other pods or outside world. Service expands to multiple nodes in the cluster. This is very similar to overlay network in Docker.
+
+Services are identified by service ports. When a service is created, k8s assigns a virtual IP address to that service.  Any pod in the cluster can reach the service by that virtual IP and port.
+
+How does service know about pods? This association is made through selectors in service definition. The only thing a service knows about a pod is the target port number.
+
+We are talking about 3 types of ports in this context
+* node port
+    - port in the node that is accessible by host. It can be specified explicitly in spec but otherwise a random port between 30000-32000 is assigned. 
+* service port
+    - acts as a reverse proxy and load balancer in front of the pods
+* pod port
+    - target port application is exposing
+
+#### How to access node from host?
+>>> Host and node are in the same network and can access each other by IP without NAT. question? what type of network is >>> this ? who creates this network?
+???
+I was able to access NodePort through localhost or primary network interface in host in play-with-k8s.com.
+
+Service types
+
+* NodePort
+    - Binds service to the node at a static port. Application can be accessed at <node-ip>:<node-port>. Service is exposed on *every* node in the cluster. The pod does not necessarily run on the same node the request is made. k8s is aware of pods and forward request to one of them.
+
+* ClusterIP (default)
+    - VIP of the service. service can be reached through ClusterIP or by service name (DNS). This establishes service-discovery.
+
+* LoadBalancer
+    - External load balancing. Integrate with native load balancers provided by supported cloud platforms. Cloud provider is responsible assigning an external IP for the load balancer.

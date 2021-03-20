@@ -4,12 +4,8 @@ metadata:
   name: myapp-pod
   labels:
     foo: bar
+    tier: front-end
 spec:
   containers:
     - name: nginx
       image: nginx
-    - name: postgres-container
-      image: postgres
-      env:
-        - name: POSTGRES_PASSWORD
-          value: mysecret
