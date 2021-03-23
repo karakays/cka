@@ -276,26 +276,29 @@ Every pod gets its own address. Container on the same pod share their network sp
 
 Network model requirements
 
-1. Pods on a node can communicate with pods on other nodes (in the same cluster???) without NAT. A service can reach other service by name. Standalone pods (that doesn't belong to a service) should be able to reach services by name.
+1. Pods can communicate with all other pods on other pods without NAT.
+
 2. Agents on a node can communicate with any pods on the same node.
 
 There are many solutions out there to satify such network requirements. Unlike the built-in overlay network implementation in docker, k8s relies on third-party implementations. To name a few AWS VPC CNI, Google Compute Engine, Flannel, Cisco etc.
 
 ### Service
 
-Service enable pods to expose applications to other pods or outside world. Service expands to multiple nodes in the cluster. This is very similar to overlay network in Docker.
+Service is an abstraction that defines a set of logical pods that expose applications to other pods or outside world. Service expands to multiple nodes in the cluster. This is very similar to overlay network in Docker.
 
-Services are identified by service ports. When a service is created, k8s assigns a virtual IP address to that service.  Any pod in the cluster can reach the service by that virtual IP and port.
+How does service know about pods? This association is made through selectors in service definition. 
 
-How does service know about pods? This association is made through selectors in service definition. The only thing a service knows about a pod is the target port number.
+#### kube-proxy
 
-We are talking about 3 types of ports in this context
-* node port
-    - port in the node that is accessible by host. It can be specified explicitly in spec but otherwise a random port between 30000-32000 is assigned. 
-* service port
-    - acts as a reverse proxy and load balancer in front of the pods
-* pod port
-    - target port application is exposing
+Every node runs a `kube-proxy`. `kube-proxy` is responsible to proxy inbound traffic to backend pods via round-robin algorithm. For this purpose, it watches control-plane for addition/removal of service and endpoint objects. For each service, it opens a random local port on local node which is called proxy port.
+
+I still don't understand communication flow here. If pod-a makes request to service-b, is it  pod -> service-a -> proxy
+port -> choose available nodes (from pods) --> arrives at chosen node --> proxies to pod
+OR
+proxy port -> pod port?
+
+
+[kube-proxy](https://d33wubrfki0l68.cloudfront.net/e351b830334b8622a700a8da6568cb081c464a9b/13020/images/docs/services-userspace-overview.svg)
 
 #### How to access node from host?
 >>> Host and node are in the same network and can access each other by IP without NAT. question? what type of network is >>> this ? who creates this network?
@@ -304,11 +307,12 @@ I was able to access NodePort through localhost or primary network interface in 
 
 Service types
 
-* NodePort
-    - Binds service to the node at a static port. Application can be accessed at <node-ip>:<node-port>. Service is exposed on *every* node in the cluster. The pod does not necessarily run on the same node the request is made. k8s is aware of pods and forward request to one of them.
-
 * ClusterIP (default)
-    - VIP of the service. service can be reached through ClusterIP or by service name (DNS). This establishes service-discovery.
+    - cluster-internal service.
+
+* NodePort
+    - Binds a static port *on each* node to the service. `ClusterIP` service is automatically created. The intention is to let applications be accessed externally (outside cluster) at <node-ip>:<node-port>. This is similar to port publishing in docker. 
 
 * LoadBalancer
-    - External load balancing. Integrate with native load balancers provided by supported cloud platforms. Cloud provider is responsible assigning an external IP for the load balancer.
+    - Exposes service externally using cloud provider's load balancer (for insance AWS ELB). Cloud provider is responsible assigning an external IP for the load balancer. Cloud provider is also responsible for load balancing algorithm.
+    
