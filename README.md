@@ -28,9 +28,17 @@ Q>>> kubectl connection refused when in worker nodes because there is no api-ser
 
 ### As a single-node cluster
 
-`minikube` bundles k8s components in a single image and provides k8s service in a single node.
+`minikube` bundles k8s components including container runtime in a single image and provides k8s service in a single node.
 
 `minikube start`
+
+Q>>> minikube vs Docker desktop
+Q>>> is minikube a container running in docker-desktop with iamge gcr.io/k8s-minikube/kicbase (from dd dashboard). That
+means kubernetes single cluster runs as a docker container.
+Q>>> local register of docker desktop is different from minikube local registry? not only that minikube has docker
+container runtime (as k8s component)?
+that's why we need `eval $(minikube docker-env)?
+Q>>> minikube -p minikube docker-env
 
 ### As a multi-node cluster
 
@@ -78,6 +86,7 @@ Create or update resource from file in _idempotent_ way
 
 `kubectl create -f resource.yml`
 
+
 #### Get
 
 Get overview of resource
@@ -106,15 +115,23 @@ Delete resource
 
 `kubectl delete [resource] [name]`
 
-## Terms
+
+#### Create pods
+
+Create a deployment from image and runs it
+`kubectl run [name] --image=[image]`
+
+Create a service for existing pod ???? Check
+`kubectl expose pod foo --name=bar --port=80 --target-port=8000`
+
+Create a service for deployment????? Check
+`kubectl expose deployment foo --name=myservice --port=80 --tarrget-port=8000`
+
+## Resources
 
 ### Pods
 
 It represents smallest deployable unit. It is a logical group of containers which together form a unit of service by sharing same resources.
-
-Create and start a pod
-
-`kubectl run nginx --image nginx`
 
 `Ready` column show number of containers in that pod.
 
@@ -129,7 +146,6 @@ myapp-pod                         2/2     Running   0          5s
 `kubectl describe node minikube`
 
 `kubectl describe pod `
-
 
 `kubectl delete pod [name]`
 
@@ -260,13 +276,15 @@ REVISION  CHANGE-CAUSE
 kubectl scale deployment --replicas=3 foo
 ```
 
-### Manifest
 
-kind: Pod | ReplicaSets | Deployment
+### ConfigMap
 
-Create pod spec
-`kubectl run pod --image redis --dry-run=client -o yaml > pod.yaml`
+Non-confidential configuration resource. Pods can use it as 
 
+* Environment variables in container
+* Command-line args for container
+* Configuration files in a volume
+* Use k8s API to poll on ConfigMap
 
 ### k8s network model
 
@@ -276,6 +294,7 @@ Every pod gets its own address. Container on the same pod share their network sp
 
 Network model requirements
 
+????? Check confirm
 1. Pods can communicate with all other pods on other pods without NAT.
 
 2. Agents on a node can communicate with any pods on the same node.
@@ -292,11 +311,11 @@ How does service know about pods? This association is made through selectors in 
 
 Every node runs a `kube-proxy`. `kube-proxy` is responsible to proxy inbound traffic to backend pods via round-robin algorithm. For this purpose, it watches control-plane for addition/removal of service and endpoint objects. For each service, it opens a random local port on local node which is called proxy port.
 
+Check ???
 I still don't understand communication flow here. If pod-a makes request to service-b, is it  pod -> service-a -> proxy
 port -> choose available nodes (from pods) --> arrives at chosen node --> proxies to pod
 OR
 proxy port -> pod port?
-
 
 [kube-proxy](https://d33wubrfki0l68.cloudfront.net/e351b830334b8622a700a8da6568cb081c464a9b/13020/images/docs/services-userspace-overview.svg)
 
