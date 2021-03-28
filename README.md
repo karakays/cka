@@ -1,17 +1,19 @@
-# ckad
+# Certified Kubernetes Admninistrator
 
-## Components
+![cka-logo](https://training.linuxfoundation.org/wp-content/uploads/2020/12/kubernetes-cka-color.svg)
+
+## Kubernetes components
 
 |name| task
 |---|---
-|api-server| meets outbound requests from kubectl and inbound requests from kubelets
-|controller| monitors workers
-|etcd| distributed datastore
-|scheduler| assigns tasks to workers
-|container runtime
-|kubelet| agent
+|api-server| Router for outbound (from kubectl) and inbound requests (from kubelet)
+|controller| Monitors workers
+|etcd| Distributed datastore
+|scheduler| Assigns tasks to workers
+|container runtime | Provides runtime for pods e.g. docker, CRI-O or container
+|kubelet| Node agent that talks to api-server
 
-## Node roles / components
+## Node roles
 
 Which nodes have what components?
 
@@ -20,25 +22,49 @@ Which nodes have what components?
 |master| api-server, controller, etcd, scheduler
 |worker| container runtime, kubelet
 
-Q>>> control-plane vs. master node
-Q>>> kubectl talks to api-server only?
-Q>>> kubectl connection refused when in worker nodes because there is no api-server?
+Q>>> control-plane vs. master node  
+Q>>> kubectl talks to api-server only?  
+Q>>> kubectl connection refused when in worker nodes because there is no api-server? 
 
-## k8s cluster provisioning
 
-### As a single-node cluster
+### `kubectl`
 
-`minikube` bundles k8s components including container runtime in a single image and provides k8s service in a single node.
+`kubectl` can talk to multiple clusters. Cluster configuration such as api-server address, authentication details (password-based or mTLS) etc. are hold in `.kube/config`.
+
+Get configured clusters
+
+`kubectl config get-contexts`
+
+Get current context
+
+`kubectl config current-context`
+
+Switch cluster context. Any command from then on will go to bar cluster. 
+
+`kubectl config use-context bar`
+
+## k8s distributions
+
+### `minikube`
+
+`minikube` bundles k8s components into a single image and provides a single-node k8s cluster.
 
 `minikube start`
 
-Q>>> minikube vs Docker desktop
-Q>>> is minikube a container running in docker-desktop with iamge gcr.io/k8s-minikube/kicbase (from dd dashboard). That
-means kubernetes single cluster runs as a docker container.
-Q>>> local register of docker desktop is different from minikube local registry? not only that minikube has docker
-container runtime (as k8s component)?
-that's why we need `eval $(minikube docker-env)?
-Q>>> minikube -p minikube docker-env
+#### Drivers
+
+`minikube` can be deployed in various ways
+* in a container as part of existing docker environment
+* in a VM like VirtualBox
+* or bare-metal
+
+`minikube config get driver`
+
+It is important to know that minikube comes with a container runtime for itself. This runtime is different than what is instaled by docker-desktop. If minikube driver is docker, this can cause
+confusion with existing `docker` clients for instance when building a docker image with `docker`.Trying to consume such
+image in minikube pods will cause error as minikube has a different local registry that docker. Solve this problem by running `eval $(minikube docker-env)` adjusts the environment so that docker client points to minikube's container runtime.
+
+As an alternative to `minikube`, docker-desktop with version 18.06 started to include k8s server and client (which can replace minikube)
 
 ### As a multi-node cluster
 
@@ -69,6 +95,8 @@ kubeadm token create --print-join-command
 Clusters is provisioned and managed by the provider.
 
 * EKS: Elastic Kubernetes Service
+    - prepare context
+      `aws eks update-kubeconfig --name bar-cluster`
 
 * GKE: Google Kubernetes Engine
 
@@ -85,7 +113,6 @@ Create resource from file in _non-idempotent_ way
 Create or update resource from file in _idempotent_ way
 
 `kubectl create -f resource.yml`
-
 
 #### Get
 
@@ -276,7 +303,6 @@ REVISION  CHANGE-CAUSE
 kubectl scale deployment --replicas=3 foo
 ```
 
-
 ### ConfigMap
 
 Non-confidential configuration resource. Pods can use it as 
@@ -288,14 +314,14 @@ Non-confidential configuration resource. Pods can use it as
 
 ### k8s network model
 
-#### Prerequisite
+#### Prerequisites
 
-Every pod gets its own address. Container on the same pod share their network spaces. This is unlike docker services where each container gets a separate IP address.
+Every pod gets its own address. Containers on the same pod share the network space. This is unlike docker services where each container gets a separate IP address.
 
-Network model requirements
+???Network model requirements
 
-????? Check confirm
-1. Pods can communicate with all other pods on other pods without NAT.
+1. Pods can communicate with any pod in the cluster without NAT.
+    - kube-proxy proxies service requests directly to target pods. No node network or NAT is involved.
 
 2. Agents on a node can communicate with any pods on the same node.
 
@@ -305,33 +331,26 @@ There are many solutions out there to satify such network requirements. Unlike t
 
 Service is an abstraction that defines a set of logical pods that expose applications to other pods or outside world. Service expands to multiple nodes in the cluster. This is very similar to overlay network in Docker.
 
-How does service know about pods? This association is made through selectors in service definition. 
+Service-pod association is made through selectors in service definition. 
 
 #### kube-proxy
 
-Every node runs a `kube-proxy`. `kube-proxy` is responsible to proxy inbound traffic to backend pods via round-robin algorithm. For this purpose, it watches control-plane for addition/removal of service and endpoint objects. For each service, it opens a random local port on local node which is called proxy port.
+In every node, there runs a `kube-proxy` which is responsible to proxy inbound traffic to the service (VIP and port) and then to backend pods (available service endpoints). `kube-proxy` watches control plane for service endpoint objects and installs iptables rules for available backend pods. Service request is forwarded to one of the backend pod:targetPort directly without NAT and node network space.
 
-Check ???
-I still don't understand communication flow here. If pod-a makes request to service-b, is it  pod -> service-a -> proxy
-port -> choose available nodes (from pods) --> arrives at chosen node --> proxies to pod
-OR
-proxy port -> pod port?
+There are different proxying modes. One of them happens at the user-space where traffic is interfered by kube-proxy. In this mode, kubeproxy opens a local random port (in iptables rule) for each service and traffic is redirected to kubeproxy first. kubeproxy then resolves backend ports to redirect to. This is not efficient because there is an additional hop (kubeproxy) which happens in the user-space. Another proxy mode which is efficient and the default is `iptables` mode where proxying happens at the kernel level. In this mode, kube-proxy is responsible for installing iptables rules only by syncing with the control plane and does not interfere traffic.
 
-[kube-proxy](https://d33wubrfki0l68.cloudfront.net/e351b830334b8622a700a8da6568cb081c464a9b/13020/images/docs/services-userspace-overview.svg)
+![kube-proxy-in-iptables-mode](https://d33wubrfki0l68.cloudfront.net/27b2978647a8d7bdc2a96b213f0c0d3242ef9ce0/e8c9b/images/docs/services-iptables-overview.svg)
 
-#### How to access node from host?
->>> Host and node are in the same network and can access each other by IP without NAT. question? what type of network is >>> this ? who creates this network?
-???
-I was able to access NodePort through localhost or primary network interface in host in play-with-k8s.com.
+#### Publishing services
 
-Service types
+ServiceTypes
 
 * ClusterIP (default)
-    - cluster-internal service.
+    - Cluster-internal service.
 
 * NodePort
-    - Binds a static port *on each* node to the service. `ClusterIP` service is automatically created. The intention is to let applications be accessed externally (outside cluster) at <node-ip>:<node-port>. This is similar to port publishing in docker. 
+    - Binds a static port *on each* node. `ClusterIP` service is automatically created. The intention is to let applications be accessed externally (outside cluster) at <node-ip>:<node-port>. This is similar to port publishing in docker. 
 
 * LoadBalancer
-    - Exposes service externally using cloud provider's load balancer (for insance AWS ELB). Cloud provider is responsible assigning an external IP for the load balancer. Cloud provider is also responsible for load balancing algorithm.
+    - Exposes service externally to cloud provider's load balancer (e.g. AWS ELB). Cloud provider is responsible assigning an external IP for the load balancer and load balancing algorithm.
     

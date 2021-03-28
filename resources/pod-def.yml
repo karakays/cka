@@ -1,11 +1,25 @@
 apiVersion: v1 
 kind: Pod
 metadata:
-  name: myapp-pod
+  name: foo-pod
   labels:
-    foo: bar
+    type: foo
     tier: front-end
 spec:
   containers:
-    - name: nginx
-      image: nginx
+    - name: echo
+      image: k8s.gcr.io/echoserver:1.4
+
+---
+
+apiVersion: v1 
+kind: Pod
+metadata:
+  name: bar-pod
+  labels:
+    type: bar
+    tier: front-end
+spec:
+  containers:
+    - name: echo
+      image: k8s.gcr.io/echoserver:1.4
