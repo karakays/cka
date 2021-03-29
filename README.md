@@ -1,4 +1,4 @@
-# Certified Kubernetes Admninistrator
+# Certified Kubernetes Administrator
 
 ![cka-logo](https://training.linuxfoundation.org/wp-content/uploads/2020/12/kubernetes-cka-color.svg)
 
@@ -9,8 +9,8 @@
 |api-server| Router for outbound (from kubectl) and inbound requests (from kubelet)
 |controller| Monitors workers
 |etcd| Distributed datastore
-|scheduler| Assigns pods to nodes
-|container runtime | Provides runtime for pods e.g. docker, CRI-O or container
+|scheduler| Assigns tasks to workers
+|container runtime | Provides runtime for pods e.g. docker, CRI-O or containerd
 |kubelet| Node agent that talks to api-server
 
 ## Node roles
@@ -230,6 +230,21 @@ When a pod is deleted, kubelet allows gracefully terminate the pod.
 3. When graceful period expires, kubelet triggers container runtime to send SIGKILL.
 4. kubelet triggers API server to remove the pod immediately and pod is deleted in control-plane.
 
+#### Why does a pod restart?
+
+
+#### How to override image command (entrypoint)?
+```
+...
+spec:
+  containers:
+  - name: foo
+    image: foo
+    command: ["run"]
+    args: ["arg1" "arg2"]
+...
+```
+
 ### ReplicaSets
 
 Pods alone cannot scale. ReplicaSet holds pod definition as a template and is able to scale the pods up/down.
@@ -389,9 +404,9 @@ Service-pod association is made through selectors in service definition.
 
 #### kube-proxy
 
-In every node, there runs a `kube-proxy` which is responsible to proxy inbound traffic to the service (VIP and port) and then to backend pods (available service endpoints). `kube-proxy` watches control plane for service endpoint objects and installs iptables rules for available backend pods. Service request is forwarded to one of the backend pod:targetPort directly without NAT and node network space.
+Every node runs a `kube-proxy`. `kube-proxy` is responsible to proxy inbound traffic to the service (VIP and port) to backend pods (service endpoint) via round-robin algorithm. `kube-proxy` watches control plane for service endpoint objects and installs iptables rules available backend pods. Request is forwarded to one of the backend pod:targetPort directly with NAT.
 
-There are different proxying modes. One of them happens at the user-space where traffic is interfered by kube-proxy. In this mode, kubeproxy opens a local random port (in iptables rule) for each service and traffic is redirected to kubeproxy first. kubeproxy then resolves backend ports to redirect to. This is not efficient because there is an additional hop (kubeproxy) which happens in the user-space. Another proxy mode which is efficient and the default is `iptables` mode where proxying happens at the kernel level. In this mode, kube-proxy is responsible for installing iptables rules only by syncing with the control plane and does not interfere traffic.
+Default mode is `iptables` proxy mode at kernel level. There is also user-space proxy mode which opens a local random port for each service, In this mode, traffic to the service is proxied first by that local random port in kube-proxy. It then redirects traffic further to backend pods. user-space mode is slow and outdated.
 
 ![kube-proxy-in-iptables-mode](https://d33wubrfki0l68.cloudfront.net/27b2978647a8d7bdc2a96b213f0c0d3242ef9ce0/e8c9b/images/docs/services-iptables-overview.svg)
 
