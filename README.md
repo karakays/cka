@@ -9,7 +9,7 @@
 |api-server| Router for outbound (from kubectl) and inbound requests (from kubelet)
 |controller| Monitors workers
 |etcd| Distributed datastore
-|scheduler| Assigns tasks to workers
+|scheduler| Assigns pods to nodes
 |container runtime | Provides runtime for pods e.g. docker, CRI-O or container
 |kubelet| Node agent that talks to api-server
 
@@ -146,19 +146,24 @@ Delete resource
 #### Create pods
 
 Create a deployment from image and runs it
+
 `kubectl run [name] --image=[image]`
 
 Create a service for existing pod ???? Check
+
 `kubectl expose pod foo --name=bar --port=80 --target-port=8000`
 
 Create a service for deployment????? Check
+
 `kubectl expose deployment foo --name=myservice --port=80 --tarrget-port=8000`
 
 ## Resources
 
 ### Pods
 
-It represents smallest deployable unit. It is a logical group of containers which together form a unit of service by sharing same resources.
+It is a logical group of containers which share same resources.
+
+`volume` belongs to the pod but it is shared between containers in it. On the other hand, probes belong to containers.
 
 `Ready` column show number of containers in that pod.
 
@@ -168,13 +173,62 @@ NAME                              READY   STATUS    RESTARTS   AGE
 myapp-pod                         2/2     Running   0          5s
 ```
 
-`kubectl describe <resource> [name]`
+#### Lifecycle
 
-`kubectl describe node minikube`
+Pod's status can be in different phases during its life.
 
-`kubectl describe pod `
+|Phase|Description
+|---|---
+|Pending |  pod accepted by the cluster but not yet assigned to node or container image is being downloaded
+|Running | pod assigned to node, all containers created and at least one of them is running
+|Succeeded | all containers terminated in success and won't be restarted
+|Failed | all containers terminated and at least one of them terminated in failure
+|Unknown | status cannot be obtained due to network error etc.
 
-`kubectl delete pod [name]`
+Once the scheduler assigns a pods to a node, kubelet starts creating containers for that pod. State of each container is
+tracked which can be in
+
+|||
+|---|---
+|Waiting | Container not yet started waiting for operation to complete
+|Running | Container is up
+|Terminated | Terminated either with success or failure
+
+#### Container health
+
+Container health can be monitored with liveness and readiness probes. If liveness probe fails, kubelet kills the
+container and creates a new one.
+
+This event is logged in the pod.
+
+```
+Events:
+  Type     Reason     Age                 From               Message
+  ----     ------     ----                ----               -------
+  Normal   Scheduled  <unknown>                              Successfully assigned default/spring-boot-pod to minikube
+  Normal   Killing    15m (x2 over 16m)   kubelet, minikube  Container spring-boot failed liveness probe, will be restarted
+  Normal   Pulled     15m (x3 over 16m)   kubelet, minikube  Container image "springio/gs-spring-boot-docker:1" already present on machine
+  Normal   Created    15m (x3 over 16m)   kubelet, minikube  Created container spring-boot
+  Normal   Started    15m (x3 over 16m)   kubelet, minikube  Started container spring-boot
+  Warning  Unhealthy  15m (x7 over 16m)   kubelet, minikube  Liveness probe failed: Get "http://172.17.0.2:8085/actuator/health": dial tcp 172.17.0.2:8085: connect: connection refused
+  Warning  Unhealthy  15m (x7 over 16m)   kubelet, minikube  Readiness probe failed: Get "http://172.17.0.2:8085/actuator/health": dial tcp 172.17.0.2:8085: connect: connection refused
+  Warning  BackOff    91s (x57 over 14m)  kubelet, minikube  Back-off restarting failed container
+```
+
+A podspec defines `restartPolicy` with possible values `Always`, `OnFailure`, `Never`. By default policy, terminated containers are always restarted. The policy applies to all containers in that pod. Containers are restarted with exponential backoff. During backoff, pod status is marked `CrashLoopBackOff` status.
+
+A pod with containers that are marked not ready is not ready to server and does not receive traffic. Readiness probes runs on the container during
+it whole lifecycle.
+
+#### Termination
+
+
+When a pod is deleted, kubelet allows gracefully terminate the pod.
+1. Pod is marked `Terminating` and preStop hook on the container is run if any.
+2. kubelet trigger container runtime to send TERM signal to process pid=1 inside each container. Graceful period starts
+   that lasts 30 seconds.
+3. When graceful period expires, kubelet triggers container runtime to send SIGKILL.
+4. kubelet triggers API server to remove the pod immediately and pod is deleted in control-plane.
 
 ### ReplicaSets
 
