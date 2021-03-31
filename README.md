@@ -232,8 +232,7 @@ When a pod is deleted, kubelet allows gracefully terminate the pod.
 
 #### Why does a pod restart?
 
-
-#### How to override image command (entrypoint)?
+#### How to override image command (entrypoint) in pod/deployment spec?
 ```
 ...
 spec:
@@ -244,7 +243,6 @@ spec:
     args: ["arg1" "arg2"]
 ...
 ```
-
 ### ReplicaSets
 
 Pods alone cannot scale. ReplicaSet holds pod definition as a template and is able to scale the pods up/down.
@@ -380,6 +378,79 @@ Non-confidential configuration resource. Pods can use it as
 * Command-line args for container
 * Configuration files in a volume
 * Use k8s API to poll on ConfigMap
+
+### Secrets
+
+Secrets are kubernetes resources that store confidential data. Secrets are stored in cleartext by default. Anyone with API or etcd access can read them.
+
+Secrets are configured  with `data` (or `stringData`) fields. A single secret resource can contain multiple key-value pairs like `username`, `password` etc. under `data` field. The value of each key/value pairs must be base64-encoded strings. On the other hand,`stringData` field accepts arbitrary string values.
+
+How many key/value pairs secret has is shown in DATA column.
+```
+$ kubectl get secrets
+NAME                  TYPE                                  DATA   AGE
+bar                   Opaque                                2      66m
+```
+
+Type | Usage
+--- | ---
+| Opaque | arbitrary user-defined data
+| kubernetes.io/basic-auth | credentials for basic authentication
+| kubernetes.io/ssh-auth | credentials for SSH
+| kubernetes.io/tls | TLS key
+| kubernetes.io/dockercfg | serialized .dockercfg file
+
+#### Create secrets
+
+From file. File content is encoded and stored.
+
+```
+kubectl create secret generic foo --from-file=file1 --from-file=file2
+```
+
+From literal. 
+
+```
+kubectl create secret generic foo --from-literal=username=foo --from-literal=password=P@ss
+```
+
+Expose
+
+```
+kubectl get secret foo -o json | jq '.data'
+```
+
+#### Use secrets
+
+Secrets can be referenced by a pod in such ways
+
+* As files in a volume mounted. In this case, For each key/value pair, a file is created with the key and content is the
+  value.
+
+```
+spec:
+...
+  volumes:
+  - name: foo
+    secret:
+      secretName: mysecret
+...
+```
+
+* As container environment variables. Secret key value is stored in environment variable.
+```
+spec:
+...
+  containers:
+  - name: foo
+    env:
+      - name: REDIS_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: redis_secret
+            key: password
+...
+```
 
 ### k8s network model
 
